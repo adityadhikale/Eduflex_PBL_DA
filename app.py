@@ -1,1301 +1,1299 @@
-"""
-AI-Powered Learning Platform - Analytics Dashboard
-Multi-tab Streamlit application for market analysis
-"""
-
 import streamlit as st
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
 import plotly.express as px
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import seaborn as sns
-import matplotlib.pyplot as plt
-from io import BytesIO
-import base64
-
-# Machine Learning Libraries
-from sklearn.model_selection import train_test_split
+from scipy import stats
+from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.preprocessing import StandardScaler, LabelEncoder
-from sklearn.linear_model import LogisticRegression, LinearRegression, Ridge, Lasso
-from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
-from sklearn.svm import SVC
-from sklearn.cluster import KMeans, DBSCAN, AgglomerativeClustering
+from sklearn.linear_model import LinearRegression, Ridge, Lasso
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.cluster import KMeans, AgglomerativeClustering, DBSCAN
 from sklearn.decomposition import PCA
-from sklearn.metrics import (
-    accuracy_score, precision_score, recall_score, f1_score,
-    confusion_matrix, classification_report, roc_curve, auc,
-    mean_squared_error, mean_absolute_error, r2_score,
-    silhouette_score, davies_bouldin_score
-)
+from sklearn.manifold import TSNE
+from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error, silhouette_score, davies_bouldin_score
 from mlxtend.frequent_patterns import apriori, association_rules
 from mlxtend.preprocessing import TransactionEncoder
-import xgboost as xgb
-from scipy.cluster.hierarchy import dendrogram, linkage
-from scipy.spatial.distance import pdist, squareform
-import networkx as nx
 import warnings
 warnings.filterwarnings('ignore')
+import io
+from datetime import datetime
 
-# ============================================================================
-# PAGE CONFIGURATION
-# ============================================================================
-
+# Page configuration
 st.set_page_config(
-    page_title="AI Learning Platform Analytics",
-    page_icon="🎓",
+    page_title="AI Learning Platform - Data Analysis Suite",
+    page_icon="🎯",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 # Custom CSS
 st.markdown("""
-    <style>
-    .main {
-        padding: 0rem 1rem;
+<style>
+    .main-header {
+        font-size: 3rem;
+        color: #1f77b4;
+        text-align: center;
+        font-weight: bold;
+        padding: 1rem;
+        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }
+    .sub-header {
+        font-size: 1.5rem;
+        color: #2c3e50;
+        font-weight: bold;
+        margin-top: 1rem;
+    }
+    .metric-card {
+        background-color: #f8f9fa;
+        padding: 1rem;
+        border-radius: 10px;
+        border-left: 5px solid #667eea;
+        margin: 0.5rem 0;
+    }
+    .insight-box {
+        background-color: #e8f5e9;
+        padding: 1rem;
+        border-radius: 10px;
+        border-left: 5px solid #4caf50;
+        margin: 1rem 0;
     }
     .stTabs [data-baseweb="tab-list"] {
-        gap: 24px;
+        gap: 2rem;
     }
     .stTabs [data-baseweb="tab"] {
-        height: 50px;
-        white-space: pre-wrap;
+        height: 3rem;
+        padding: 0 2rem;
         background-color: #f0f2f6;
-        border-radius: 5px 5px 0px 0px;
-        gap: 1px;
-        padding-top: 10px;
-        padding-bottom: 10px;
+        border-radius: 10px 10px 0 0;
     }
     .stTabs [aria-selected="true"] {
-        background-color: #4CAF50;
+        background-color: #667eea;
         color: white;
     }
-    </style>
-    """, unsafe_allow_html=True)
+</style>
+""", unsafe_allow_html=True)
 
 # ============================================================================
-# HELPER FUNCTIONS - DATA GENERATION
+# HELPER FUNCTIONS
 # ============================================================================
+
+@st.cache_data
+def load_data(uploaded_file):
+    """Load data from uploaded file"""
+    try:
+        df = pd.read_csv(uploaded_file)
+        return df, None
+    except Exception as e:
+        return None, str(e)
 
 @st.cache_data
 def generate_synthetic_data(n_samples=1000):
-    """Generate synthetic survey dataset"""
+    """Generate synthetic survey data"""
     np.random.seed(42)
     
-    # Demographics
-    ages = np.random.choice(['18-24', '25-34', '35-44', '45-54', '55+'], n_samples, 
-                           p=[0.15, 0.35, 0.25, 0.15, 0.10])
-    incomes = np.random.choice(['<25k', '25-50k', '50-75k', '75-100k', '100-150k', '>150k'], n_samples,
-                              p=[0.15, 0.25, 0.25, 0.15, 0.12, 0.08])
-    fields = np.random.choice(['Tech/IT', 'Data Science', 'Business', 'Marketing', 'Finance', 'Other'], 
-                             n_samples, p=[0.25, 0.20, 0.20, 0.15, 0.12, 0.08])
+    # WTP mapping
+    wtp_categories = ['$0 - $10', '$11 - $25', '$26 - $50', '$51 - $75', 
+                      '$76 - $100', '$101 - $150', 'Above $150']
+    wtp_weights = [0.08, 0.15, 0.25, 0.22, 0.15, 0.10, 0.05]
     
-    # Learning behavior
-    learning_hours = np.random.choice(['0-2', '3-5', '6-10', '11-15', '16-20', '>20'], n_samples,
-                                     p=[0.20, 0.35, 0.25, 0.12, 0.05, 0.03])
+    data = {
+        'Q1_Age': np.random.choice(['18-24', '25-34', '35-44', '45-54', '55+'], 
+                                  n_samples, p=[0.15, 0.35, 0.25, 0.15, 0.10]),
+        'Q2_Gender': np.random.choice(['Male', 'Female', 'Non-binary', 'Prefer not to say'], 
+                                      n_samples, p=[0.48, 0.48, 0.02, 0.02]),
+        'Q8_Income': np.random.choice(['Less than $25,000', '$25,000 - $50,000', '$50,001 - $75,000',
+                                     '$75,001 - $100,000', '$100,001 - $150,000', 'Above $150,000'],
+                                    n_samples, p=[0.15, 0.25, 0.25, 0.20, 0.10, 0.05]),
+        'Q22_Current_Spending': np.random.choice(['$0 (Only free resources)', '$1 - $20', '$21 - $50',
+                                                  '$51 - $100', '$101 - $200', 'Above $200'],
+                                                 n_samples, p=[0.30, 0.30, 0.20, 0.12, 0.05, 0.03]),
+        'Q23_Willingness_To_Pay': np.random.choice(wtp_categories, n_samples, p=wtp_weights),
+        'Q31_Interest_Level': np.random.choice(['Definitely would subscribe', 'Very likely to subscribe',
+                                                'Somewhat interested', 'Might consider', 'Not interested'],
+                                               n_samples, p=[0.15, 0.25, 0.30, 0.20, 0.10]),
+        'Q9_Learning_Hours': np.random.choice(['0-2 hours', '3-5 hours', '6-10 hours', 
+                                               '11-15 hours', '16-20 hours', 'More than 20 hours'],
+                                              n_samples, p=[0.20, 0.30, 0.25, 0.15, 0.07, 0.03])
+    }
     
-    # Create interest level with correlation to income and hours
-    interest_probs = np.random.random(n_samples)
-    income_map = {'<25k': 0.2, '25-50k': 0.3, '50-75k': 0.5, '75-100k': 0.6, '100-150k': 0.7, '>150k': 0.8}
-    income_boost = np.array([income_map[inc] for inc in incomes])
-    hours_map = {'0-2': 0.2, '3-5': 0.4, '6-10': 0.6, '11-15': 0.8, '16-20': 0.9, '>20': 0.95}
-    hours_boost = np.array([hours_map[h] for h in learning_hours])
+    return pd.DataFrame(data)
+
+def convert_wtp_to_numeric(df, wtp_column):
+    """Convert WTP to numeric values"""
+    wtp_mapping = {
+        '$0 - $10': 5,
+        '$11 - $25': 18,
+        '$26 - $50': 38,
+        '$51 - $75': 63,
+        '$76 - $100': 88,
+        '$101 - $150': 125,
+        'Above $150': 175
+    }
     
-    interest_score = (interest_probs + income_boost + hours_boost) / 3
-    interest_levels = np.where(interest_score > 0.7, 'Definitely Subscribe',
-                    np.where(interest_score > 0.5, 'Very Likely',
-                    np.where(interest_score > 0.35, 'Somewhat Interested',
-                    np.where(interest_score > 0.2, 'Might Consider', 'Not Interested'))))
-    
-    # Willingness to Pay (correlated with income and interest)
-    wtp_base = np.random.randint(10, 150, n_samples)
-    income_multiplier = np.array([0.5, 0.7, 1.0, 1.3, 1.6, 2.0])[[list({'<25k': 0, '25-50k': 1, '50-75k': 2, '75-100k': 3, '100-150k': 4, '>150k': 5}.keys()).index(inc) for inc in incomes]]
-    wtp = (wtp_base * income_multiplier * (1 + interest_score)).astype(int)
-    wtp = np.clip(wtp, 10, 200)
-    
-    # Spending behavior
-    current_spending = np.where(wtp < 30, '<20',
-                       np.where(wtp < 60, '20-50',
-                       np.where(wtp < 90, '50-80',
-                       np.where(wtp < 120, '80-120', '>120'))))
-    
-    # Topics (multi-select simulation)
-    all_topics = ['Data Science', 'Python', 'Web Dev', 'Business Analytics', 
-                 'AI/ML', 'Cloud Computing', 'Marketing', 'Finance']
-    topics_binary = np.random.randint(0, 2, (n_samples, len(all_topics)))
-    
-    # Platforms (multi-select)
-    all_platforms = ['Coursera', 'Udemy', 'LinkedIn Learning', 'YouTube', 'DataCamp', 'edX']
-    platforms_binary = np.random.randint(0, 2, (n_samples, len(all_platforms)))
-    
-    # Formats (multi-select)
-    all_formats = ['Video Short', 'Video Long', 'Interactive Coding', 'Live Sessions', 'Reading', 'Projects']
-    formats_binary = np.random.randint(0, 2, (n_samples, len(all_formats)))
-    
-    # Create DataFrame
-    df = pd.DataFrame({
-        'Age': ages,
-        'Income': incomes,
-        'Professional_Field': fields,
-        'Learning_Hours': learning_hours,
-        'Interest_Level': interest_levels,
-        'Willingness_To_Pay': wtp,
-        'Current_Spending': current_spending,
-        'Engagement_Frequency': np.random.choice(['Daily', '3-5/week', '1-2/week', 'Few/month', 'Rarely'], 
-                                                 n_samples, p=[0.15, 0.30, 0.30, 0.15, 0.10])
-    })
-    
-    # Add topic columns
-    for i, topic in enumerate(all_topics):
-        df[f'Topic_{topic.replace(" ", "_").replace("/", "_")}'] = topics_binary[:, i]
-    
-    # Add platform columns
-    for i, platform in enumerate(all_platforms):
-        df[f'Platform_{platform.replace(" ", "_")}'] = platforms_binary[:, i]
-    
-    # Add format columns
-    for i, fmt in enumerate(all_formats):
-        df[f'Format_{fmt.replace(" ", "_")}'] = formats_binary[:, i]
+    if wtp_column in df.columns:
+        df['WTP_Numeric'] = df[wtp_column].map(wtp_mapping)
     
     return df
 
-@st.cache_data
-def load_sample_data():
-    """Load or generate sample data"""
-    try:
-        # Try to load from URL (replace with your GitHub URL)
-        # df = pd.read_csv('YOUR_GITHUB_RAW_URL_HERE')
-        df = generate_synthetic_data(1000)
-        return df
-    except:
-        return generate_synthetic_data(1000)
+def create_features(df):
+    """Create engineered features"""
+    df_processed = df.copy()
+    
+    # Age mapping
+    age_mapping = {'18-24': 21, '25-34': 29.5, '35-44': 39.5, '45-54': 49.5, '55+': 60}
+    if 'Q1_Age' in df.columns:
+        df_processed['Age_Numeric'] = df['Q1_Age'].map(age_mapping)
+    
+    # Income mapping
+    income_mapping = {
+        'Less than $25,000': 20000,
+        '$25,000 - $50,000': 37500,
+        '$50,001 - $75,000': 62500,
+        '$75,001 - $100,000': 87500,
+        '$100,001 - $150,000': 125000,
+        'Above $150,000': 175000
+    }
+    if 'Q8_Income' in df.columns:
+        df_processed['Income_Numeric'] = df['Q8_Income'].map(income_mapping)
+    
+    # Current spending mapping
+    spending_mapping = {
+        '$0 (Only free resources)': 0,
+        '$1 - $20': 10,
+        '$21 - $50': 35,
+        '$51 - $100': 75,
+        '$101 - $200': 150,
+        'Above $200': 250
+    }
+    if 'Q22_Current_Spending' in df.columns:
+        df_processed['Current_Spending'] = df['Q22_Current_Spending'].map(spending_mapping)
+    
+    # Interest level mapping
+    interest_mapping = {
+        'Definitely would subscribe': 5,
+        'Very likely to subscribe': 4,
+        'Somewhat interested': 3,
+        'Might consider': 2,
+        'Not interested': 1
+    }
+    if 'Q31_Interest_Level' in df.columns:
+        df_processed['Interest_Level'] = df['Q31_Interest_Level'].map(interest_mapping)
+    
+    # Learning hours mapping
+    hours_mapping = {
+        '0-2 hours': 1,
+        '3-5 hours': 4,
+        '6-10 hours': 8,
+        '11-15 hours': 13,
+        '16-20 hours': 18,
+        'More than 20 hours': 25
+    }
+    if 'Q9_Learning_Hours' in df.columns:
+        df_processed['Learning_Hours'] = df['Q9_Learning_Hours'].map(hours_mapping)
+    
+    # Derived features
+    if 'Income_Numeric' in df_processed.columns and 'Current_Spending' in df_processed.columns:
+        df_processed['Income_Spending_Ratio'] = df_processed['Income_Numeric'] / (df_processed['Current_Spending'] + 1)
+    
+    if 'Income_Numeric' in df_processed.columns:
+        df_processed['High_Earner'] = (df_processed['Income_Numeric'] >= 100000).astype(int)
+    
+    if 'Interest_Level' in df_processed.columns:
+        df_processed['Highly_Interested'] = (df_processed['Interest_Level'] >= 4).astype(int)
+    
+    return df_processed
 
 # ============================================================================
-# UTILITY FUNCTIONS
-# ============================================================================
-
-def download_csv(df, filename):
-    """Generate download link for dataframe"""
-    csv = df.to_csv(index=False)
-    b64 = base64.b64encode(csv.encode()).decode()
-    href = f'<a href="data:file/csv;base64,{b64}" download="{filename}">Download {filename}</a>'
-    return href
-
-def to_excel(df):
-    """Convert dataframe to Excel"""
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False)
-    return output.getvalue()
-
-# ============================================================================
-# ASSOCIATION RULES FUNCTIONS
-# ============================================================================
-
-def prepare_transaction_data(df, selected_cols):
-    """Prepare data for association rule mining"""
-    transactions = []
-    for _, row in df.iterrows():
-        transaction = []
-        for col in selected_cols:
-            if col in df.columns:
-                if df[col].dtype in ['int64', 'float64']:
-                    if row[col] == 1:
-                        transaction.append(col.replace('_', ' '))
-                else:
-                    transaction.append(f"{col}: {row[col]}")
-        transactions.append(transaction)
-    return transactions
-
-def run_apriori(df, selected_cols, min_support, min_confidence, min_lift):
-    """Run Apriori algorithm"""
-    transactions = prepare_transaction_data(df, selected_cols)
-    
-    # One-hot encode
-    te = TransactionEncoder()
-    te_array = te.fit(transactions).transform(transactions)
-    df_encoded = pd.DataFrame(te_array, columns=te.columns_)
-    
-    # Find frequent itemsets
-    frequent_itemsets = apriori(df_encoded, min_support=min_support, use_colnames=True)
-    
-    if len(frequent_itemsets) == 0:
-        return None, None
-    
-    # Generate rules
-    rules = association_rules(frequent_itemsets, metric="confidence", min_threshold=min_confidence)
-    
-    # Filter by lift
-    rules = rules[rules['lift'] >= min_lift]
-    
-    return frequent_itemsets, rules
-
-# ============================================================================
-# CLASSIFICATION FUNCTIONS
-# ============================================================================
-
-def prepare_classification_data(df, target_col, binary=False):
-    """Prepare data for classification"""
-    # Encode categorical features
-    df_encoded = df.copy()
-    le_dict = {}
-    
-    for col in df_encoded.columns:
-        if df_encoded[col].dtype == 'object' and col != target_col:
-            le = LabelEncoder()
-            df_encoded[col] = le.fit_transform(df_encoded[col].astype(str))
-            le_dict[col] = le
-    
-    # Prepare target
-    le_target = LabelEncoder()
-    y = le_target.fit_transform(df_encoded[target_col])
-    
-    if binary:
-        # Convert to binary (high interest vs low interest)
-        y = np.where(y <= 1, 1, 0)
-    
-    # Features
-    X = df_encoded.drop([target_col], axis=1)
-    
-    # Handle any remaining object columns
-    for col in X.columns:
-        if X[col].dtype == 'object':
-            X[col] = LabelEncoder().fit_transform(X[col].astype(str))
-    
-    return X, y, le_target
-
-def train_classification_models(X_train, X_test, y_train, y_test, models_list):
-    """Train multiple classification models"""
-    results = {}
-    
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_test_scaled = scaler.transform(X_test)
-    
-    for model_name in models_list:
-        if model_name == 'Logistic Regression':
-            model = LogisticRegression(max_iter=1000, random_state=42)
-        elif model_name == 'Random Forest':
-            model = RandomForestClassifier(n_estimators=100, random_state=42)
-        elif model_name == 'XGBoost':
-            model = xgb.XGBClassifier(n_estimators=100, random_state=42, use_label_encoder=False, eval_metric='logloss')
-        elif model_name == 'SVM':
-            model = SVC(probability=True, random_state=42)
-        
-        model.fit(X_train_scaled, y_train)
-        y_pred = model.predict(X_test_scaled)
-        y_proba = model.predict_proba(X_test_scaled) if hasattr(model, 'predict_proba') else None
-        
-        results[model_name] = {
-            'model': model,
-            'predictions': y_pred,
-            'probabilities': y_proba,
-            'accuracy': accuracy_score(y_test, y_pred),
-            'precision': precision_score(y_test, y_pred, average='weighted', zero_division=0),
-            'recall': recall_score(y_test, y_pred, average='weighted', zero_division=0),
-            'f1': f1_score(y_test, y_pred, average='weighted', zero_division=0)
-        }
-    
-    return results, scaler
-
-# ============================================================================
-# CLUSTERING FUNCTIONS
-# ============================================================================
-
-def prepare_clustering_data(df, feature_cols):
-    """Prepare data for clustering"""
-    df_cluster = df[feature_cols].copy()
-    
-    # Encode categorical
-    for col in df_cluster.columns:
-        if df_cluster[col].dtype == 'object':
-            df_cluster[col] = LabelEncoder().fit_transform(df_cluster[col].astype(str))
-    
-    # Scale
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(df_cluster)
-    
-    return X_scaled, df_cluster, scaler
-
-def run_clustering(X, algorithm, n_clusters=3, eps=0.5, min_samples=5):
-    """Run clustering algorithm"""
-    if algorithm == 'K-Means':
-        model = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
-    elif algorithm == 'Hierarchical':
-        model = AgglomerativeClustering(n_clusters=n_clusters)
-    elif algorithm == 'DBSCAN':
-        model = DBSCAN(eps=eps, min_samples=min_samples)
-    
-    labels = model.fit_predict(X)
-    
-    # Calculate metrics
-    if len(np.unique(labels)) > 1:
-        silhouette = silhouette_score(X, labels)
-        davies_bouldin = davies_bouldin_score(X, labels)
-    else:
-        silhouette = -1
-        davies_bouldin = -1
-    
-    return labels, silhouette, davies_bouldin, model
-
-# ============================================================================
-# REGRESSION FUNCTIONS
-# ============================================================================
-
-def prepare_regression_data(df, target_col):
-    """Prepare data for regression"""
-    df_encoded = df.copy()
-    
-    # Encode categorical
-    for col in df_encoded.columns:
-        if df_encoded[col].dtype == 'object' and col != target_col:
-            df_encoded[col] = LabelEncoder().fit_transform(df_encoded[col].astype(str))
-    
-    y = df_encoded[target_col]
-    X = df_encoded.drop([target_col], axis=1)
-    
-    # Handle any remaining object columns
-    for col in X.columns:
-        if X[col].dtype == 'object':
-            X[col] = LabelEncoder().fit_transform(X[col].astype(str))
-    
-    return X, y
-
-def train_regression_models(X_train, X_test, y_train, y_test, models_list):
-    """Train multiple regression models"""
-    results = {}
-    
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_test_scaled = scaler.transform(X_test)
-    
-    for model_name in models_list:
-        if model_name == 'Linear Regression':
-            model = LinearRegression()
-        elif model_name == 'Ridge':
-            model = Ridge(alpha=1.0, random_state=42)
-        elif model_name == 'Lasso':
-            model = Lasso(alpha=1.0, random_state=42)
-        elif model_name == 'Random Forest':
-            model = RandomForestRegressor(n_estimators=100, random_state=42)
-        elif model_name == 'XGBoost':
-            model = xgb.XGBRegressor(n_estimators=100, random_state=42)
-        
-        model.fit(X_train_scaled, y_train)
-        y_pred = model.predict(X_test_scaled)
-        
-        mse = mean_squared_error(y_test, y_pred)
-        rmse = np.sqrt(mse)
-        mae = mean_absolute_error(y_test, y_pred)
-        r2 = r2_score(y_test, y_pred)
-        mape = np.mean(np.abs((y_test - y_pred) / y_test)) * 100
-        
-        results[model_name] = {
-            'model': model,
-            'predictions': y_pred,
-            'mse': mse,
-            'rmse': rmse,
-            'mae': mae,
-            'r2': r2,
-            'mape': mape
-        }
-    
-    return results, scaler
-
-# ============================================================================
-# MAIN APP
+# MAIN APPLICATION
 # ============================================================================
 
 def main():
     # Title
-    st.title("🎓 AI Learning Platform - Market Analytics Dashboard")
-    st.markdown("### Comprehensive Analysis Suite: Association Rules | Classification | Clustering | Regression | Dynamic Pricing")
-    st.markdown("---")
+    st.markdown('<h1 class="main-header">🎯 AI Learning Platform - Data Analysis Suite</h1>', 
+                unsafe_allow_html=True)
+    
+    st.markdown("""
+    <div style='text-align: center; padding: 1rem; background-color: #f8f9fa; border-radius: 10px; margin-bottom: 2rem;'>
+        <h3>Complete Data-Driven Decision Making Platform</h3>
+        <p>Analyze customer data, predict willingness to pay, discover patterns, and segment customers</p>
+    </div>
+    """, unsafe_allow_html=True)
     
     # Sidebar
     with st.sidebar:
-        st.header("📂 Data Upload")
+        st.image("https://img.icons8.com/fluency/96/000000/artificial-intelligence.png", width=100)
+        st.title("📊 Navigation")
         
-        # Data source selection
-        data_source = st.radio(
-            "Select Data Source:",
-            ["Use Sample Data", "Upload CSV", "Load from URL"]
+        page = st.radio(
+            "Select Analysis Module:",
+            ["🏠 Home & Data Upload",
+             "📊 Exploratory Data Analysis",
+             "🔍 Association Rule Mining",
+             "👥 Customer Clustering",
+             "💰 Regression Analysis (WTP)",
+             "📈 Business Dashboard",
+             "📥 Export Reports"],
+            label_visibility="collapsed"
         )
         
-        if data_source == "Upload CSV":
-            uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
-            if uploaded_file is not None:
-                df = pd.read_csv(uploaded_file)
-                st.success(f"✅ Loaded {len(df)} rows")
-            else:
-                df = load_sample_data()
-                st.info("Using sample data")
-        elif data_source == "Load from URL":
-            url = st.text_input("Enter CSV URL (GitHub raw URL recommended)")
-            if url:
-                try:
-                    df = pd.read_csv(url)
-                    st.success(f"✅ Loaded {len(df)} rows from URL")
-                except:
-                    st.error("Failed to load from URL. Using sample data.")
-                    df = load_sample_data()
-            else:
-                df = load_sample_data()
-                st.info("Using sample data")
+        st.markdown("---")
+        st.markdown("### 🎯 Quick Stats")
+        
+        if 'df' in st.session_state and st.session_state.df is not None:
+            st.metric("Total Records", len(st.session_state.df))
+            st.metric("Total Features", len(st.session_state.df.columns))
         else:
-            df = load_sample_data()
-            st.success(f"✅ Sample data loaded: {len(df)} rows")
-        
-        st.markdown("---")
-        st.markdown("### 📊 Data Preview")
-        st.dataframe(df.head(3), use_container_width=True)
-        
-        st.markdown("---")
-        st.markdown("### ℹ️ About")
-        st.info("This dashboard provides comprehensive market analysis tools for the AI Learning Platform.")
+            st.info("Load data to see stats")
     
-    # Main tabs
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "🔗 Association Rules", 
-        "🎯 Classification", 
-        "👥 Clustering", 
-        "📈 Regression",
-        "💰 Dynamic Pricing"
-    ])
+    # Initialize session state
+    if 'df' not in st.session_state:
+        st.session_state.df = None
+    if 'df_processed' not in st.session_state:
+        st.session_state.df_processed = None
     
-    # ========================================================================
-    # TAB 1: ASSOCIATION RULES
-    # ========================================================================
+    # Route to selected page
+    if page == "🏠 Home & Data Upload":
+        page_home()
+    elif page == "📊 Exploratory Data Analysis":
+        page_eda()
+    elif page == "🔍 Association Rule Mining":
+        page_association_rules()
+    elif page == "👥 Customer Clustering":
+        page_clustering()
+    elif page == "💰 Regression Analysis (WTP)":
+        page_regression()
+    elif page == "📈 Business Dashboard":
+        page_dashboard()
+    elif page == "📥 Export Reports":
+        page_export()
+
+# ============================================================================
+# PAGE 1: HOME & DATA UPLOAD (FIXED - SINGLE VERSION)
+# ============================================================================
+
+def page_home():
+    st.markdown('<h2 class="sub-header">🏠 Welcome to the Analysis Suite</h2>', 
+                unsafe_allow_html=True)
+    
+    # STATUS INDICATOR
+    st.markdown("### 📊 Data Status")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if st.session_state.df is not None:
+            st.success("✅ Data Loaded")
+        else:
+            st.error("❌ No Data")
+    
+    with col2:
+        if st.session_state.df_processed is not None:
+            st.success("✅ Data Processed")
+        else:
+            st.warning("⚠️ Data Not Processed")
+    
+    with col3:
+        if st.session_state.df is not None:
+            st.info(f"📊 {len(st.session_state.df)} rows")
+        else:
+            st.info("📊 0 rows")
+    
+    st.markdown("---")
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        st.markdown("""
+        ### 🎯 What This Application Does
+        
+        This comprehensive data analysis suite provides:
+        
+        1. **📊 Exploratory Data Analysis (EDA)**
+           - Comprehensive statistical summaries
+           - Distribution analysis
+           - Correlation heatmaps
+           - Interactive visualizations
+        
+        2. **🔍 Association Rule Mining**
+           - Apriori algorithm implementation
+           - Market basket analysis
+           - Customer behavior patterns
+           - Actionable recommendations
+        
+        3. **👥 Customer Clustering**
+           - K-Means, Hierarchical, DBSCAN
+           - Customer segmentation
+           - Cluster profiling
+           - Business personas
+        
+        4. **💰 Regression Analysis**
+           - Willingness to Pay prediction
+           - Multiple ML models comparison
+           - Feature importance analysis
+           - Pricing recommendations
+        
+        5. **📈 Business Dashboard**
+           - Executive summary
+           - KPI tracking
+           - Visual insights
+           - Strategic recommendations
+        """)
+    
+    with col2:
+        st.markdown("### 📊 Quick Start")
+        st.info("""
+        **Step 1:** Upload or generate data ⬇️
+        
+        **Step 2:** Click "Process Data" button ✅
+        
+        **Step 3:** Run analyses from sidebar 📊
+        
+        **Step 4:** Export reports 📥
+        """)
+    
+    st.markdown("---")
+    
+    # Data Upload Section
+    st.markdown("### 📁 STEP 1: Load Data")
+    
+    tab1, tab2 = st.tabs(["📤 Upload CSV", "🎲 Generate Synthetic Data"])
     
     with tab1:
-        st.header("🔗 Association Rule Mining")
-        st.markdown("Discover patterns and relationships in customer behavior")
+        st.markdown("**Upload your survey data CSV file**")
+        # THIS IS THE WIDGET THAT HAD THE DUPLICATE KEY
+        uploaded_file = st.file_uploader("Choose a CSV file", type=['csv'], key="csv_upload_main")
         
-        col1, col2 = st.columns([1, 2])
-        
-        with col1:
-            st.subheader("⚙️ Parameters")
-            
-            min_support = st.slider("Minimum Support", 0.01, 0.5, 0.1, 0.01)
-            min_confidence = st.slider("Minimum Confidence", 0.1, 0.9, 0.5, 0.05)
-            min_lift = st.slider("Minimum Lift", 1.0, 5.0, 1.5, 0.1)
-            
-            # Select columns for analysis
-            binary_cols = [col for col in df.columns if df[col].nunique() == 2 or col.startswith(('Topic_', 'Platform_', 'Format_'))]
-            categorical_cols = [col for col in df.columns if df[col].dtype == 'object']
-            
-            available_cols = binary_cols + categorical_cols
-            selected_cols = st.multiselect(
-                "Select Features for Analysis",
-                available_cols,
-                default=binary_cols[:10] if len(binary_cols) > 10 else binary_cols
-            )
-            
-            run_apriori_btn = st.button("🚀 Run Association Rule Mining", type="primary")
-        
-        with col2:
-            if run_apriori_btn and len(selected_cols) > 0:
-                with st.spinner("Running Apriori algorithm..."):
-                    frequent_itemsets, rules = run_apriori(df, selected_cols, min_support, min_confidence, min_lift)
+        if uploaded_file is not None:
+            with st.spinner("Loading data..."):
+                df, error = load_data(uploaded_file)
+                
+                if error:
+                    st.error(f"Error loading data: {error}")
+                else:
+                    st.session_state.df = df
+                    st.session_state.df_processed = None # Reset processed data on new upload
+                    st.success(f"✅ Data loaded successfully! {len(df)} rows, {len(df.columns)} columns")
                     
-                    if rules is not None and len(rules) > 0:
-                        st.success(f"✅ Found {len(rules)} association rules")
-                        
-                        # Sort by lift
-                        rules = rules.sort_values('lift', ascending=False)
-                        
-                        # Display top rules
-                        st.subheader(f"📊 Top 10 Rules by Lift")
-                        
-                        top_rules = rules.head(10).copy()
-                        top_rules['antecedents'] = top_rules['antecedents'].apply(lambda x: ', '.join(list(x)))
-                        top_rules['consequents'] = top_rules['consequents'].apply(lambda x: ', '.join(list(x)))
-                        
-                        display_cols = ['antecedents', 'consequents', 'support', 'confidence', 'lift']
-                        st.dataframe(
-                            top_rules[display_cols].style.format({
-                                'support': '{:.3f}',
-                                'confidence': '{:.3f}',
-                                'lift': '{:.3f}'
-                            }),
-                            use_container_width=True
-                        )
-                        
-                        # Visualization
-                        st.subheader("📈 Visualizations")
-                        
-                        # Scatter plot
-                        fig = px.scatter(
-                            rules,
-                            x='support',
-                            y='confidence',
-                            size='lift',
-                            color='lift',
-                            hover_data=['support', 'confidence', 'lift'],
-                            title='Association Rules: Support vs Confidence (sized by Lift)',
-                            color_continuous_scale='Viridis'
-                        )
-                        fig.update_layout(height=500)
-                        st.plotly_chart(fig, use_container_width=True)
-                        
-                        # Metrics
-                        col_m1, col_m2, col_m3 = st.columns(3)
-                        col_m1.metric("Total Rules", len(rules))
-                        col_m2.metric("Avg Confidence", f"{rules['confidence'].mean():.3f}")
-                        col_m3.metric("Avg Lift", f"{rules['lift'].mean():.3f}")
-                        
-                        # Download
-                        st.subheader("💾 Download Results")
-                        rules_export = rules.copy()
-                        rules_export['antecedents'] = rules_export['antecedents'].apply(lambda x: ', '.join(list(x)))
-                        rules_export['consequents'] = rules_export['consequents'].apply(lambda x: ', '.join(list(x)))
-                        
-                        csv = rules_export.to_csv(index=False)
-                        st.download_button(
-                            label="📥 Download Rules as CSV",
-                            data=csv,
-                            file_name="association_rules.csv",
-                            mime="text/csv"
-                        )
-                    else:
-                        st.warning("⚠️ No rules found with current parameters. Try lowering the thresholds.")
-            else:
-                st.info("👈 Configure parameters and click 'Run' to generate association rules")
-    
-    # ========================================================================
-    # TAB 2: CLASSIFICATION
-    # ========================================================================
+                    # Preview
+                    with st.expander("👀 Preview Data (Click to expand)"):
+                        st.dataframe(df.head(10), use_container_width=True)
     
     with tab2:
-        st.header("🎯 Classification Analysis")
-        st.markdown("Predict customer interest levels using machine learning")
+        st.markdown("**Generate synthetic survey data for testing**")
         
-        col1, col2 = st.columns([1, 2])
+        n_samples = st.slider("Number of samples to generate", 100, 5000, 1000, 100)
         
-        with col1:
-            st.subheader("⚙️ Configuration")
-            
-            # Target selection
-            target_col = st.selectbox(
-                "Target Variable",
-                ['Interest_Level', 'Willingness_To_Pay'] if 'Interest_Level' in df.columns else df.select_dtypes(include='object').columns
-            )
-            
-            # Binary or multi-class
-            is_binary = st.checkbox("Convert to Binary Classification", value=False)
-            if is_binary:
-                st.info("Will convert to: High Interest (1) vs Low Interest (0)")
-            
-            # Model selection
-            available_models = ['Logistic Regression', 'Random Forest', 'XGBoost', 'SVM']
-            selected_models = st.multiselect(
-                "Select Models to Compare",
-                available_models,
-                default=['Logistic Regression', 'Random Forest']
-            )
-            
-            # Train-test split
-            test_size = st.slider("Test Set Size", 0.1, 0.4, 0.2, 0.05)
-            
-            run_classification = st.button("🚀 Train Models", type="primary")
+        if st.button("🎲 Generate Synthetic Data", type="primary"):
+            with st.spinner("Generating synthetic data..."):
+                df = generate_synthetic_data(n_samples)
+                st.session_state.df = df
+                st.session_state.df_processed = None # Reset processed data
+                
+                st.success(f"✅ Generated {n_samples} synthetic records!")
+                
+                # Preview
+                with st.expander("👀 Preview Data (Click to expand)"):
+                    st.dataframe(df.head(10), use_container_width=True)
+    
+    # STEP 2: PROCESS DATA
+    st.markdown("---")
+    st.markdown("### 🔧 STEP 2: Process Data (REQUIRED for Analysis)")
+    
+    if st.session_state.df is not None:
+        st.info("⚠️ Click the button below to process your data before running any analysis")
+        
+        col1, col2, col3 = st.columns([1, 2, 1])
         
         with col2:
-            if run_classification and len(selected_models) > 0:
-                with st.spinner("Training models..."):
-                    # Prepare data
-                    X, y, le_target = prepare_classification_data(df, target_col, binary=is_binary)
-                    
-                    # Split
-                    X_train, X_test, y_train, y_test = train_test_split(
-                        X, y, test_size=test_size, random_state=42, stratify=y
-                    )
-                    
-                    # Train models
-                    results, scaler = train_classification_models(
-                        X_train, X_test, y_train, y_test, selected_models
-                    )
-                    
-                    st.success("✅ Training complete!")
-                    
-                    # Model comparison
-                    st.subheader("📊 Model Comparison")
-                    
-                    comparison_df = pd.DataFrame({
-                        'Model': list(results.keys()),
-                        'Accuracy': [r['accuracy'] for r in results.values()],
-                        'Precision': [r['precision'] for r in results.values()],
-                        'Recall': [r['recall'] for r in results.values()],
-                        'F1-Score': [r['f1'] for r in results.values()]
-                    })
-                    
-                    st.dataframe(
-                        comparison_df.style.format({
-                            'Accuracy': '{:.4f}',
-                            'Precision': '{:.4f}',
-                            'Recall': '{:.4f}',
-                            'F1-Score': '{:.4f}'
-                        }).highlight_max(axis=0, color='lightgreen'),
-                        use_container_width=True
-                    )
-                    
-                    # Best model
-                    best_model_name = comparison_df.loc[comparison_df['F1-Score'].idxmax(), 'Model']
-                    st.success(f"🏆 Best Model: **{best_model_name}**")
-                    
-                    # Visualizations
-                    st.subheader("📈 Visualizations")
-                    
-                    # Metrics comparison
-                    fig = px.bar(
-                        comparison_df.melt(id_vars='Model', var_name='Metric', value_name='Score'),
-                        x='Model',
-                        y='Score',
-                        color='Metric',
-                        barmode='group',
-                        title='Model Performance Comparison'
-                    )
-                    fig.update_layout(height=400)
-                    st.plotly_chart(fig, use_container_width=True)
-                    
-                    # Confusion matrix for best model
-                    st.subheader(f"🎯 Confusion Matrix - {best_model_name}")
-                    
-                    best_result = results[best_model_name]
-                    cm = confusion_matrix(y_test, best_result['predictions'])
-                    
-                    fig_cm = px.imshow(
-                        cm,
-                        labels=dict(x="Predicted", y="Actual", color="Count"),
-                        x=[f"Class {i}" for i in range(cm.shape[1])],
-                        y=[f"Class {i}" for i in range(cm.shape[0])],
-                        color_continuous_scale='Blues',
-                        text_auto=True
-                    )
-                    fig_cm.update_layout(height=400)
-                    st.plotly_chart(fig_cm, use_container_width=True)
-                    
-                    # Classification report
-                    with st.expander("📋 Detailed Classification Report"):
-                        report = classification_report(y_test, best_result['predictions'], output_dict=True)
-                        report_df = pd.DataFrame(report).transpose()
-                        st.dataframe(report_df.style.format("{:.3f}"), use_container_width=True)
-                    
-                    # Feature importance (if applicable)
-                    if best_model_name in ['Random Forest', 'XGBoost']:
-                        st.subheader("🎯 Feature Importance")
+            if st.button("🔧 PROCESS DATA NOW", type="primary", use_container_width=True):
+                with st.spinner("Processing data and creating features..."):
+                    try:
+                        # Convert WTP to numeric
+                        df_processed = convert_wtp_to_numeric(st.session_state.df.copy(), 'Q23_Willingness_To_Pay')
                         
-                        model = best_result['model']
-                        if hasattr(model, 'feature_importances_'):
-                            feat_imp = pd.DataFrame({
-                                'Feature': X.columns,
-                                'Importance': model.feature_importances_
-                            }).sort_values('Importance', ascending=False).head(15)
-                            
-                            fig_imp = px.bar(
-                                feat_imp,
-                                x='Importance',
-                                y='Feature',
-                                orientation='h',
-                                title='Top 15 Most Important Features'
-                            )
-                            fig_imp.update_layout(height=500)
-                            st.plotly_chart(fig_imp, use_container_width=True)
-                    
-                    # Download predictions
-                    st.subheader("💾 Download Results")
-                    predictions_df = pd.DataFrame({
-                        'Actual': y_test,
-                        'Predicted': best_result['predictions']
-                    })
-                    
-                    csv = predictions_df.to_csv(index=False)
-                    st.download_button(
-                        label="📥 Download Predictions",
-                        data=csv,
-                        file_name="classification_predictions.csv",
-                        mime="text/csv"
-                    )
-            else:
-                st.info("👈 Select models and click 'Train Models' to start analysis")
-    
-    # ========================================================================
-    # TAB 3: CLUSTERING
-    # ========================================================================
-    
-    with tab3:
-        st.header("👥 Customer Segmentation - Clustering")
-        st.markdown("Identify customer segments and create personas")
+                        # Create features
+                        df_processed = create_features(df_processed)
+                        
+                        # Store in session state
+                        st.session_state.df_processed = df_processed
+                        
+                        st.success("✅ Data processed successfully!")
+                        st.balloons()
+                        
+                        # Show what was created
+                        st.markdown("#### ✅ Created Features:")
+                        new_cols = [col for col in df_processed.columns if col not in st.session_state.df.columns]
+                        st.write(f"Added {len(new_cols)} new features:")
+                        
+                        col_a, col_b = st.columns(2)
+                        with col_a:
+                            for col in new_cols[:(len(new_cols) + 1)//2]: # Handle odd numbers
+                                st.write(f"• {col}")
+                        with col_b:
+                            for col in new_cols[(len(new_cols) + 1)//2:]:
+                                st.write(f"• {col}")
+                        
+                        st.info("🎉 You can now use all analysis features from the sidebar!")
+                        
+                    except Exception as e:
+                        st.error(f"Error processing data: {str(e)}")
+                        st.error("Please check your data format and try again")
         
-        col1, col2 = st.columns([1, 2])
+        # Show current status
+        if st.session_state.df_processed is not None:
+            st.success("✅ Data is already processed and ready for analysis!")
+            
+            with st.expander("📊 View Processed Data Summary"):
+                st.write(f"**Total Features:** {len(st.session_state.df_processed.columns)}")
+                st.write(f"**Numeric Features:** {len(st.session_state.df_processed.select_dtypes(include=[np.number]).columns)}")
+                
+                # Show sample
+                st.dataframe(st.session_state.df_processed.head(5), use_container_width=True)
+    else:
+        st.warning("⚠️ Please load data first (Step 1 above)")
+    
+    # Data Info
+    if st.session_state.df is not None:
+        st.markdown("---")
+        st.markdown("### 📋 Dataset Information")
+        
+        col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            st.subheader("⚙️ Configuration")
-            
-            # Feature selection
-            numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-            categorical_cols = df.select_dtypes(include='object').columns.tolist()
-            
-            clustering_features = st.multiselect(
-                "Select Features for Clustering",
-                numeric_cols + categorical_cols,
-                default=['Age', 'Income', 'Learning_Hours', 'Willingness_To_Pay'][:min(4, len(numeric_cols + categorical_cols))]
-            )
-            
-            # Algorithm
-            algorithm = st.selectbox("Clustering Algorithm", ['K-Means', 'Hierarchical', 'DBSCAN'])
-            
-            if algorithm in ['K-Means', 'Hierarchical']:
-                n_clusters = st.slider("Number of Clusters", 2, 10, 4)
+            st.metric("Total Records", len(st.session_state.df))
+        with col2:
+            st.metric("Total Features", len(st.session_state.df.columns))
+        with col3:
+            st.metric("Missing Values", st.session_state.df.isnull().sum().sum())
+        with col4:
+            if st.session_state.df_processed is not None:
+                st.metric("Processed Features", len(st.session_state.df_processed.columns))
             else:
-                eps = st.slider("DBSCAN: Epsilon", 0.1, 2.0, 0.5, 0.1)
-                min_samples = st.slider("DBSCAN: Min Samples", 2, 20, 5)
-                n_clusters = None
+                st.metric("Processed Features", "Not yet")
+
+
+# ============================================================================
+# PAGE 2: EXPLORATORY DATA ANALYSIS
+# ============================================================================
+
+def page_eda():
+    st.markdown('<h2 class="sub-header">📊 Exploratory Data Analysis</h2>', 
+                unsafe_allow_html=True)
+    
+    if st.session_state.df is None:
+        st.warning("⚠️ Please upload or generate data first!")
+        return
+    
+    df = st.session_state.df
+    
+    tab1, tab2, tab3, tab4 = st.tabs(["📈 Statistical Summary", "📊 Distributions", 
+                                     "🔗 Correlations", "🎯 Target Analysis"])
+    
+    # Tab 1: Statistical Summary
+    with tab1:
+        st.markdown("### 📈 Statistical Summary")
+        
+        # Numeric columns
+        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        
+        if len(numeric_cols) > 0:
+            st.dataframe(df[numeric_cols].describe().T, use_container_width=True)
+        
+        # Categorical columns
+        st.markdown("### 📋 Categorical Variables")
+        categorical_cols = df.select_dtypes(include=['object']).columns.tolist()
+        
+        if len(categorical_cols) > 0:
+            selected_cat = st.selectbox("Select categorical variable", categorical_cols)
             
-            run_clustering_btn = st.button("🚀 Run Clustering", type="primary")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown(f"#### Value Counts: {selected_cat}")
+                value_counts = df[selected_cat].value_counts()
+                st.dataframe(value_counts, use_container_width=True)
+            
+            with col2:
+                st.markdown("#### Distribution")
+                fig = px.bar(x=value_counts.index, y=value_counts.values,
+                             labels={'x': selected_cat, 'y': 'Count'},
+                             title=f'Distribution of {selected_cat}')
+                fig.update_traces(marker_color='#667eea')
+                st.plotly_chart(fig, use_container_width=True)
+    
+    # Tab 2: Distributions
+    with tab2:
+        st.markdown("### 📊 Variable Distributions")
+        
+        # Select variable
+        all_cols = df.columns.tolist()
+        selected_var = st.selectbox("Select variable to visualize", all_cols, key="dist_select")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Histogram
+            if df[selected_var].dtype in ['int64', 'float64']:
+                fig = px.histogram(df, x=selected_var, title=f'Distribution of {selected_var}',
+                                   marginal='box', color_discrete_sequence=['#667eea'])
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                value_counts = df[selected_var].value_counts()
+                fig = px.pie(values=value_counts.values, names=value_counts.index,
+                             title=f'Distribution of {selected_var}')
+                st.plotly_chart(fig, use_container_width=True)
         
         with col2:
-            if run_clustering_btn and len(clustering_features) > 0:
-                with st.spinner("Running clustering..."):
-                    # Prepare data
-                    X_scaled, df_cluster, scaler = prepare_clustering_data(df, clustering_features)
+            # Box plot or count plot
+            if df[selected_var].dtype in ['int64', 'float64']:
+                fig = px.box(df, y=selected_var, title=f'Box Plot of {selected_var}',
+                             color_discrete_sequence=['#764ba2'])
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                value_counts = df[selected_var].value_counts().head(10)
+                fig = px.bar(x=value_counts.index, y=value_counts.values,
+                             title=f'Top 10 Categories in {selected_var}',
+                             labels={'x': selected_var, 'y': 'Count'},
+                             color=value_counts.values,
+                             color_continuous_scale='Viridis')
+                st.plotly_chart(fig, use_container_width=True)
+    
+    # Tab 3: Correlations
+    with tab3:
+        st.markdown("### 🔗 Correlation Analysis")
+        
+        if st.session_state.df_processed is not None:
+            df_proc = st.session_state.df_processed
+            numeric_cols = df_proc.select_dtypes(include=[np.number]).columns.tolist()
+            
+            if len(numeric_cols) > 1:
+                corr_matrix = df_proc[numeric_cols].corr()
+                
+                # Heatmap
+                fig = px.imshow(corr_matrix, 
+                                labels=dict(color="Correlation"),
+                                x=corr_matrix.columns,
+                                y=corr_matrix.columns,
+                                color_continuous_scale='RdBu_r',
+                                aspect="auto",
+                                title="Correlation Matrix")
+                fig.update_layout(height=600)
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Top correlations with target
+                if 'WTP_Numeric' in numeric_cols:
+                    st.markdown("### 🎯 Top Features Correlated with WTP")
+                    correlations = df_proc[numeric_cols].corrwith(df_proc['WTP_Numeric']).sort_values(ascending=False)
                     
-                    # Run clustering
-                    if algorithm == 'DBSCAN':
-                        labels, silhouette, davies_bouldin, model = run_clustering(
-                            X_scaled, algorithm, eps=eps, min_samples=min_samples
-                        )
+                    fig = px.bar(x=correlations.values, y=correlations.index,
+                                 orientation='h',
+                                 labels={'x': 'Correlation', 'y': 'Feature'},
+                                 title='Feature Correlations with Willingness to Pay',
+                                 color=correlations.values,
+                                 color_continuous_scale='RdYlGn')
+                    st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Process data first to see correlations")
+    
+    # Tab 4: Target Analysis
+    with tab4:
+        st.markdown("### 🎯 Willingness to Pay Analysis")
+        
+        wtp_col = 'Q23_Willingness_To_Pay'
+        
+        if wtp_col in df.columns:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Distribution
+                value_counts = df[wtp_col].value_counts().sort_index()
+                fig = px.bar(x=value_counts.index, y=value_counts.values,
+                             labels={'x': 'Willingness to Pay', 'y': 'Count'},
+                             title='WTP Distribution',
+                             color=value_counts.values,
+                             color_continuous_scale='Viridis')
+                st.plotly_chart(fig, use_container_width=True)
+            
+            with col2:
+                # Pie chart
+                fig = px.pie(values=value_counts.values, names=value_counts.index,
+                             title='WTP Percentage Distribution',
+                             color_discrete_sequence=px.colors.sequential.Viridis)
+                st.plotly_chart(fig, use_container_width=True)
+            
+            # Numeric analysis
+            if st.session_state.df_processed is not None and 'WTP_Numeric' in st.session_state.df_processed.columns:
+                st.markdown("### 📊 Numeric WTP Statistics")
+                
+                wtp_numeric = st.session_state.df_processed['WTP_Numeric']
+                
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Mean", f"${wtp_numeric.mean():.2f}")
+                with col2:
+                    st.metric("Median", f"${wtp_numeric.median():.2f}")
+                with col3:
+                    st.metric("Std Dev", f"${wtp_numeric.std():.2f}")
+                with col4:
+                    st.metric("Range", f"${wtp_numeric.min():.0f}-${wtp_numeric.max():.0f}")
+
+# ============================================================================
+# PAGE 3: ASSOCIATION RULE MINING
+# ============================================================================
+
+def page_association_rules():
+    st.markdown('<h2 class="sub-header">🔍 Association Rule Mining</h2>', 
+                unsafe_allow_html=True)
+    
+    if st.session_state.df is None:
+        st.warning("⚠️ Please upload or generate data first!")
+        return
+    
+    df = st.session_state.df
+    
+    st.markdown("""
+    ### 📋 About Association Rule Mining
+    Discover hidden patterns and relationships in customer behavior using the Apriori algorithm.
+    """)
+    
+    # Parameters
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        min_support = st.slider("Minimum Support (%)", 5, 50, 10, 5) / 100
+    with col2:
+        min_confidence = st.slider("Minimum Confidence (%)", 30, 90, 50, 5) / 100
+    with col3:
+        max_rules = st.slider("Max Rules to Display", 5, 50, 10, 5)
+    
+    if st.button("🔍 Run Association Rule Mining", type="primary"):
+        with st.spinner("Mining association rules..."):
+            try:
+                # Prepare transaction data (simplified for demo)
+                # In real app, you'd use all multi-select columns
+                transactions = []
+                
+                for _, row in df.iterrows():
+                    transaction = []
+                    
+                    # Add categorical values as items
+                    for col in ['Q1_Age', 'Q8_Income', 'Q22_Current_Spending', 
+                                'Q23_Willingness_To_Pay', 'Q31_Interest_Level']:
+                        if col in df.columns and pd.notna(row[col]):
+                            transaction.append(f"{col}: {row[col]}")
+                    
+                    if len(transaction) > 0:
+                        transactions.append(transaction)
+                
+                # Encode transactions
+                te = TransactionEncoder()
+                te_array = te.fit(transactions).transform(transactions)
+                df_encoded = pd.DataFrame(te_array, columns=te.columns_)
+                
+                # Apply Apriori
+                frequent_itemsets = apriori(df_encoded, min_support=min_support, use_colnames=True)
+                
+                if len(frequent_itemsets) > 0:
+                    # Generate rules
+                    rules = association_rules(frequent_itemsets, metric="confidence", 
+                                              min_threshold=min_confidence)
+                    
+                    if len(rules) > 0:
+                        rules = rules.sort_values('lift', ascending=False).head(max_rules)
+                        
+                        st.success(f"✅ Found {len(rules)} association rules!")
+                        
+                        # Display rules
+                        st.markdown("### 🎯 Top Association Rules")
+                        
+                        for idx, rule in rules.iterrows():
+                            with st.expander(f"Rule #{idx+1} (Lift: {rule['lift']:.2f})"):
+                                col1, col2 = st.columns(2)
+                                
+                                with col1:
+                                    st.markdown("**IF (Antecedent):**")
+                                    for item in list(rule['antecedents']):
+                                        st.write(f"• {item}")
+                                
+                                with col2:
+                                    st.markdown("**THEN (Consequent):**")
+                                    for item in list(rule['consequents']):
+                                        st.write(f"• {item}")
+                                
+                                st.markdown("**Metrics:**")
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    st.metric("Support", f"{rule['support']:.2%}")
+                                with col2:
+                                    st.metric("Confidence", f"{rule['confidence']:.2%}")
+                                with col3:
+                                    st.metric("Lift", f"{rule['lift']:.2f}")
+                        
+                        # Visualization
+                        st.markdown("### 📊 Rules Visualization")
+                        
+                        fig = px.scatter(rules, x='support', y='confidence', 
+                                         size='lift', color='lift',
+                                         hover_data=['support', 'confidence', 'lift'],
+                                         title='Association Rules: Support vs Confidence',
+                                         labels={'support': 'Support', 'confidence': 'Confidence'},
+                                         color_continuous_scale='Viridis')
+                        st.plotly_chart(fig, use_container_width=True)
+                        
                     else:
-                        labels, silhouette, davies_bouldin, model = run_clustering(
-                            X_scaled, algorithm, n_clusters=n_clusters
-                        )
+                        st.warning(f"No rules found with confidence >= {min_confidence*100}%. Try lowering the threshold.")
+                else:
+                    st.warning(f"No frequent itemsets found with support >= {min_support*100}%. Try lowering the threshold.")
                     
-                    df_result = df.copy()
-                    df_result['Cluster'] = labels
+            except Exception as e:
+                st.error(f"Error during analysis: {str(e)}")
+
+# ============================================================================
+# PAGE 4: CUSTOMER CLUSTERING
+# ============================================================================
+
+def page_clustering():
+    st.markdown('<h2 class="sub-header">👥 Customer Clustering Analysis</h2>', 
+                unsafe_allow_html=True)
+    
+    if st.session_state.df_processed is None:
+        st.warning("⚠️ Please process data first!")
+        return
+    
+    df = st.session_state.df_processed
+    
+    st.markdown("""
+    ### 📋 About Customer Clustering
+    Segment customers into distinct groups based on their characteristics and behavior.
+    """)
+    
+    # Select features for clustering
+    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    
+    if len(numeric_cols) < 2:
+        st.error("Need at least 2 numeric features for clustering")
+        return
+    
+    # Remove target variable from features
+    if 'WTP_Numeric' in numeric_cols:
+        numeric_cols.remove('WTP_Numeric')
+    
+    selected_features = st.multiselect(
+        "Select features for clustering",
+        numeric_cols,
+        default=numeric_cols[:min(5, len(numeric_cols))]
+    )
+    
+    if len(selected_features) < 2:
+        st.warning("Please select at least 2 features")
+        return
+    
+    # Clustering parameters
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        algorithm = st.selectbox("Clustering Algorithm", 
+                                 ["K-Means", "Hierarchical", "DBSCAN"])
+    
+    with col2:
+        if algorithm == "K-Means" or algorithm == "Hierarchical":
+            n_clusters = st.slider("Number of Clusters", 2, 10, 4)
+    
+    if st.button("🎯 Run Clustering Analysis", type="primary"):
+        with st.spinner(f"Running {algorithm} clustering..."):
+            try:
+                # Prepare data
+                X = df[selected_features].copy()
+                X = X.fillna(X.median())
+                
+                # Standardize
+                scaler = StandardScaler()
+                X_scaled = scaler.fit_transform(X)
+                
+                # Apply clustering
+                if algorithm == "K-Means":
+                    model = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+                    labels = model.fit_predict(X_scaled)
                     
-                    st.success(f"✅ Clustering complete! Found {len(np.unique(labels))} clusters")
+                elif algorithm == "Hierarchical":
+                    model = AgglomerativeClustering(n_clusters=n_clusters)
+                    labels = model.fit_predict(X_scaled)
                     
-                    # Metrics
-                    col_m1, col_m2, col_m3 = st.columns(3)
-                    col_m1.metric("Clusters Found", len(np.unique(labels)))
-                    col_m2.metric("Silhouette Score", f"{silhouette:.3f}" if silhouette > -1 else "N/A")
-                    col_m3.metric("Davies-Bouldin Index", f"{davies_bouldin:.3f}" if davies_bouldin > -1 else "N/A")
+                elif algorithm == "DBSCAN":
+                    model = DBSCAN(eps=0.5, min_samples=5)
+                    labels = model.fit_predict(X_scaled)
+                    n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
+                
+                # Calculate metrics
+                if len(set(labels)) > 1:
+                    silhouette = silhouette_score(X_scaled, labels)
+                    davies_bouldin = davies_bouldin_score(X_scaled, labels)
                     
-                    # Cluster profiles
-                    st.subheader("📊 Cluster Profiles (Personas)")
+                    # Display metrics
+                    st.markdown("### 📊 Clustering Metrics")
+                    col1, col2, col3 = st.columns(3)
                     
-                    profile_features = [f for f in clustering_features if f in df.columns]
-                    cluster_profiles = df_result.groupby('Cluster')[profile_features].agg(['mean', 'count'])
+                    with col1:
+                        st.metric("Number of Clusters", n_clusters)
+                    with col2:
+                        st.metric("Silhouette Score", f"{silhouette:.3f}")
+                    with col3:
+                        st.metric("Davies-Bouldin Index", f"{davies_bouldin:.3f}")
                     
-                    st.dataframe(cluster_profiles.style.format("{:.2f}"), use_container_width=True)
-                    
-                    # PCA Visualization
-                    st.subheader("📈 2D Visualization (PCA)")
-                    
+                    # PCA for visualization
                     pca = PCA(n_components=2)
                     X_pca = pca.fit_transform(X_scaled)
                     
-                    pca_df = pd.DataFrame({
+                    # Create visualization dataframe
+                    viz_df = pd.DataFrame({
                         'PC1': X_pca[:, 0],
                         'PC2': X_pca[:, 1],
-                        'Cluster': labels
+                        'Cluster': labels.astype(str)
                     })
                     
-                    fig_pca = px.scatter(
-                        pca_df,
-                        x='PC1',
-                        y='PC2',
-                        color='Cluster',
-                        title=f'Cluster Visualization (PCA) - Explained Variance: {sum(pca.explained_variance_ratio_):.2%}',
-                        labels={'Cluster': 'Cluster'},
-                        color_continuous_scale='viridis' if algorithm == 'DBSCAN' else None
-                    )
-                    fig_pca.update_layout(height=500)
-                    st.plotly_chart(fig_pca, use_container_width=True)
+                    # Plot
+                    st.markdown("### 📊 Cluster Visualization (PCA)")
                     
-                    # Elbow curve (K-Means only)
-                    if algorithm == 'K-Means':
-                        st.subheader("📉 Elbow Curve")
-                        
-                        inertias = []
-                        K_range = range(2, min(11, len(X_scaled)))
-                        
-                        for k in K_range:
-                            kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
-                            kmeans.fit(X_scaled)
-                            inertias.append(kmeans.inertia_)
-                        
-                        fig_elbow = px.line(
-                            x=list(K_range),
-                            y=inertias,
-                            markers=True,
-                            labels={'x': 'Number of Clusters', 'y': 'Inertia'},
-                            title='Elbow Curve for Optimal K'
-                        )
-                        fig_elbow.update_layout(height=400)
-                        st.plotly_chart(fig_elbow, use_container_width=True)
+                    fig = px.scatter(viz_df, x='PC1', y='PC2', color='Cluster',
+                                     title=f'{algorithm} Clustering Results',
+                                     labels={'PC1': f'PC1 ({pca.explained_variance_ratio_[0]:.1%} variance)',
+                                             'PC2': f'PC2 ({pca.explained_variance_ratio_[1]:.1%} variance)'},
+                                     color_discrete_sequence=px.colors.qualitative.Set2)
+                    st.plotly_chart(fig, use_container_width=True)
                     
-                    # Cluster distribution
-                    st.subheader("📊 Cluster Distribution")
+                    # Cluster profiles
+                    st.markdown("### 👥 Cluster Profiles")
                     
-                    cluster_counts = pd.DataFrame(df_result['Cluster'].value_counts()).reset_index()
-                    cluster_counts.columns = ['Cluster', 'Count']
+                    df['Cluster'] = labels
                     
-                    fig_dist = px.bar(
-                        cluster_counts,
-                        x='Cluster',
-                        y='Count',
-                        title='Number of Customers per Cluster',
-                        color='Count',
-                        color_continuous_scale='Blues'
-                    )
-                    fig_dist.update_layout(height=400)
-                    st.plotly_chart(fig_dist, use_container_width=True)
-                    
-                    # Download
-                    st.subheader("💾 Download Results")
-                    
-                    csv = df_result.to_csv(index=False)
-                    st.download_button(
-                        label="📥 Download Cluster Assignments",
-                        data=csv,
-                        file_name="clustering_results.csv",
-                        mime="text/csv"
-                    )
-            else:
-                st.info("👈 Select features and click 'Run Clustering' to start analysis")
-    
-    # ========================================================================
-    # TAB 4: REGRESSION
-    # ========================================================================
-    
-    with tab4:
-        st.header("📈 Regression Analysis")
-        st.markdown("Predict continuous values (e.g., Willingness to Pay)")
-        
-        col1, col2 = st.columns([1, 2])
-        
-        with col1:
-            st.subheader("⚙️ Configuration")
-            
-            # Target selection
-            numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-            target_col_reg = st.selectbox(
-                "Target Variable",
-                numeric_cols,
-                index=numeric_cols.index('Willingness_To_Pay') if 'Willingness_To_Pay' in numeric_cols else 0
-            )
-            
-            # Model selection
-            available_models_reg = ['Linear Regression', 'Ridge', 'Lasso', 'Random Forest', 'XGBoost']
-            selected_models_reg = st.multiselect(
-                "Select Models to Compare",
-                available_models_reg,
-                default=['Linear Regression', 'Random Forest', 'XGBoost']
-            )
-            
-            # Train-test split
-            test_size_reg = st.slider("Test Set Size", 0.1, 0.4, 0.2, 0.05, key='reg_test_size')
-            
-            run_regression = st.button("🚀 Train Models", type="primary", key='reg_train')
-        
-        with col2:
-            if run_regression and len(selected_models_reg) > 0:
-                with st.spinner("Training regression models..."):
-                    # Prepare data
-                    X_reg, y_reg = prepare_regression_data(df, target_col_reg)
-                    
-                    # Split
-                    X_train_reg, X_test_reg, y_train_reg, y_test_reg = train_test_split(
-                        X_reg, y_reg, test_size=test_size_reg, random_state=42
-                    )
-                    
-                    # Train models
-                    results_reg, scaler_reg = train_regression_models(
-                        X_train_reg, X_test_reg, y_train_reg, y_test_reg, selected_models_reg
-                    )
-                    
-                    st.success("✅ Training complete!")
-                    
-                    # Model comparison
-                    st.subheader("📊 Model Comparison")
-                    
-                    comparison_df_reg = pd.DataFrame({
-                        'Model': list(results_reg.keys()),
-                        'R²': [r['r2'] for r in results_reg.values()],
-                        'RMSE': [r['rmse'] for r in results_reg.values()],
-                        'MAE': [r['mae'] for r in results_reg.values()],
-                        'MAPE (%)': [r['mape'] for r in results_reg.values()]
-                    })
-                    
-                    st.dataframe(
-                        comparison_df_reg.style.format({
-                            'R²': '{:.4f}',
-                            'RMSE': '{:.2f}',
-                            'MAE': '{:.2f}',
-                            'MAPE (%)': '{:.2f}'
-                        }).highlight_max(subset=['R²'], color='lightgreen')
-                        .highlight_min(subset=['RMSE', 'MAE', 'MAPE (%)'], color='lightgreen'),
-                        use_container_width=True
-                    )
-                    
-                    # Best model
-                    best_model_name_reg = comparison_df_reg.loc[comparison_df_reg['R²'].idxmax(), 'Model']
-                    st.success(f"🏆 Best Model: **{best_model_name_reg}** (Highest R²)")
-                    
-                    # Metrics visualization
-                    st.subheader("📈 Model Performance Metrics")
-                    
-                    fig_metrics = make_subplots(
-                        rows=2, cols=2,
-                        subplot_titles=('R² Score', 'RMSE', 'MAE', 'MAPE'),
-                        specs=[[{'type': 'bar'}, {'type': 'bar'}],
-                               [{'type': 'bar'}, {'type': 'bar'}]]
-                    )
-                    
-                    models = comparison_df_reg['Model'].tolist()
-                    
-                    fig_metrics.add_trace(
-                        go.Bar(x=models, y=comparison_df_reg['R²'], name='R²'),
-                        row=1, col=1
-                    )
-                    fig_metrics.add_trace(
-                        go.Bar(x=models, y=comparison_df_reg['RMSE'], name='RMSE'),
-                        row=1, col=2
-                    )
-                    fig_metrics.add_trace(
-                        go.Bar(x=models, y=comparison_df_reg['MAE'], name='MAE'),
-                        row=2, col=1
-                    )
-                    fig_metrics.add_trace(
-                        go.Bar(x=models, y=comparison_df_reg['MAPE (%)'], name='MAPE'),
-                        row=2, col=2
-                    )
-                    
-                    fig_metrics.update_layout(height=600, showlegend=False)
-                    st.plotly_chart(fig_metrics, use_container_width=True)
-                    
-                    # Actual vs Predicted
-                    st.subheader(f"🎯 Actual vs Predicted - {best_model_name_reg}")
-                    
-                    best_result_reg = results_reg[best_model_name_reg]
-                    
-                    actual_pred_df = pd.DataFrame({
-                        'Actual': y_test_reg,
-                        'Predicted': best_result_reg['predictions']
-                    })
-                    
-                    fig_scatter = px.scatter(
-                        actual_pred_df,
-                        x='Actual',
-                        y='Predicted',
-                        title=f'Actual vs Predicted Values - {best_model_name_reg}',
-                        labels={'Actual': f'Actual {target_col_reg}', 'Predicted': f'Predicted {target_col_reg}'},
-                        trendline='ols'
-                    )
-                    
-                    # Add perfect prediction line
-                    max_val = max(actual_pred_df['Actual'].max(), actual_pred_df['Predicted'].max())
-                    min_val = min(actual_pred_df['Actual'].min(), actual_pred_df['Predicted'].min())
-                    fig_scatter.add_trace(
-                        go.Scatter(
-                            x=[min_val, max_val],
-                            y=[min_val, max_val],
-                            mode='lines',
-                            name='Perfect Prediction',
-                            line=dict(color='red', dash='dash')
-                        )
-                    )
-                    
-                    fig_scatter.update_layout(height=500)
-                    st.plotly_chart(fig_scatter, use_container_width=True)
-                    
-                    # Residual plot
-                    st.subheader("📉 Residual Analysis")
-                    
-                    residuals = y_test_reg - best_result_reg['predictions']
-                    residual_df = pd.DataFrame({
-                        'Predicted': best_result_reg['predictions'],
-                        'Residuals': residuals
-                    })
-                    
-                    fig_residual = px.scatter(
-                        residual_df,
-                        x='Predicted',
-                        y='Residuals',
-                        title='Residual Plot',
-                        labels={'Predicted': f'Predicted {target_col_reg}', 'Residuals': 'Residuals'}
-                    )
-                    fig_residual.add_hline(y=0, line_dash="dash", line_color="red")
-                    fig_residual.update_layout(height=400)
-                    st.plotly_chart(fig_residual, use_container_width=True)
-                    
-                    # Feature importance
-                    if best_model_name_reg in ['Random Forest', 'XGBoost']:
-                        st.subheader("🎯 Feature Importance")
-                        
-                        model_reg = best_result_reg['model']
-                        if hasattr(model_reg, 'feature_importances_'):
-                            feat_imp_reg = pd.DataFrame({
-                                'Feature': X_reg.columns,
-                                'Importance': model_reg.feature_importances_
-                            }).sort_values('Importance', ascending=False).head(15)
-                            
-                            fig_imp_reg = px.bar(
-                                feat_imp_reg,
-                                x='Importance',
-                                y='Feature',
-                                orientation='h',
-                                title='Top 15 Most Important Features'
-                            )
-                            fig_imp_reg.update_layout(height=500)
-                            st.plotly_chart(fig_imp_reg, use_container_width=True)
-                    
-                    # Download
-                    st.subheader("💾 Download Results")
-                    
-                    predictions_df_reg = pd.DataFrame({
-                        'Actual': y_test_reg,
-                        'Predicted': best_result_reg['predictions'],
-                        'Residual': residuals
-                    })
-                    
-                    csv_reg = predictions_df_reg.to_csv(index=False)
-                    st.download_button(
-                        label="📥 Download Predictions",
-                        data=csv_reg,
-                        file_name="regression_predictions.csv",
-                        mime="text/csv"
-                    )
-            else:
-                st.info("👈 Select models and click 'Train Models' to start analysis")
-    
-    # ========================================================================
-    # TAB 5: DYNAMIC PRICING
-    # ========================================================================
-    
-    with tab5:
-        st.header("💰 Dynamic Pricing Engine")
-        st.markdown("Real-time price prediction based on customer features")
-        
-        # First, train a regression model if not already done
-        if 'Willingness_To_Pay' not in df.columns:
-            st.error("❌ 'Willingness_To_Pay' column not found in dataset")
-        else:
-            col1, col2 = st.columns([1, 1])
-            
-            with col1:
-                st.subheader("🎛️ Customer Profile Input")
-                
-                # Input fields for customer features
-                input_features = {}
-                
-                # Age
-                if 'Age' in df.columns:
-                    age_options = df['Age'].unique().tolist()
-                    input_features['Age'] = st.selectbox("Age Group", age_options)
-                
-                # Income
-                if 'Income' in df.columns:
-                    income_options = df['Income'].unique().tolist()
-                    input_features['Income'] = st.selectbox("Income Level", income_options)
-                
-                # Professional Field
-                if 'Professional_Field' in df.columns:
-                    field_options = df['Professional_Field'].unique().tolist()
-                    input_features['Professional_Field'] = st.selectbox("Professional Field", field_options)
-                
-                # Learning Hours
-                if 'Learning_Hours' in df.columns:
-                    hours_options = df['Learning_Hours'].unique().tolist()
-                    input_features['Learning_Hours'] = st.selectbox("Weekly Learning Hours", hours_options)
-                
-                # Interest Level
-                if 'Interest_Level' in df.columns:
-                    interest_options = df['Interest_Level'].unique().tolist()
-                    input_features['Interest_Level'] = st.selectbox("Interest Level", interest_options)
-                
-                # Current Spending
-                if 'Current_Spending' in df.columns:
-                    spending_options = df['Current_Spending'].unique().tolist()
-                    input_features['Current_Spending'] = st.selectbox("Current Monthly Spending", spending_options)
-                
-                # Pricing strategy
-                st.markdown("---")
-                st.subheader("💡 Pricing Strategy")
-                
-                base_multiplier = st.slider("Base Price Multiplier", 0.8, 1.5, 1.0, 0.05)
-                urgency_discount = st.slider("Urgency/Promotion Discount (%)", 0, 30, 10, 5)
-                
-                predict_btn = st.button("💰 Calculate Optimal Price", type="primary")
-            
-            with col2:
-                if predict_btn:
-                    with st.spinner("Calculating optimal price..."):
-                        # Train a quick model if needed
-                        X_price, y_price = prepare_regression_data(df, 'Willingness_To_Pay')
-                        
-                        # Use Random Forest for prediction
-                        scaler_price = StandardScaler()
-                        X_price_scaled = scaler_price.fit_transform(X_price)
-                        
-                        model_price = RandomForestRegressor(n_estimators=100, random_state=42)
-                        model_price.fit(X_price_scaled, y_price)
-                        
-                        # Prepare input data
-                        input_df = pd.DataFrame([input_features])
-                        
-                        # Encode categorical features to match training data
-                        for col in input_df.columns:
-                            if input_df[col].dtype == 'object':
-                                if col in df.columns:
-                                    le = LabelEncoder()
-                                    le.fit(df[col].astype(str))
-                                    input_df[col] = le.transform(input_df[col].astype(str))
-                        
-                        # Add missing features (fill with median/mode)
-                        for col in X_price.columns:
-                            if col not in input_df.columns:
-                                if df[col].dtype in ['int64', 'float64']:
-                                    input_df[col] = df[col].median()
-                                else:
-                                    input_df[col] = df[col].mode()[0] if len(df[col].mode()) > 0 else 0
-                        
-                        # Reorder columns to match training data
-                        input_df = input_df[X_price.columns]
-                        
-                        # Scale and predict
-                        input_scaled = scaler_price.transform(input_df)
-                        base_prediction = model_price.predict(input_scaled)[0]
-                        
-                        # Apply pricing strategy
-                        adjusted_price = base_prediction * base_multiplier * (1 - urgency_discount/100)
-                        
-                        # Get prediction interval (using model's predictions on training data)
-                        predictions_on_train = model_price.predict(X_price_scaled)
-                        residuals = y_price - predictions_on_train
-                        std_residual = np.std(residuals)
-                        
-                        confidence_interval_lower = adjusted_price - 1.96 * std_residual
-                        confidence_interval_upper = adjusted_price + 1.96 * std_residual
-                        
-                        st.success("✅ Price Calculated!")
-                        
-                        # Display results
-                        st.markdown("### 🎯 Pricing Results")
-                        
-                        col_p1, col_p2, col_p3 = st.columns(3)
-                        
-                        col_p1.metric(
-                            "Base Prediction",
-                            f"${base_prediction:.2f}",
-                            help="Model's base prediction"
-                        )
-                        
-                        col_p2.metric(
-                            "Recommended Price",
-                            f"${adjusted_price:.2f}",
-                            f"{((adjusted_price - base_prediction)/base_prediction*100):+.1f}%"
-                        )
-                        
-                        col_p3.metric(
-                            "Confidence Interval",
-                            f"${confidence_interval_lower:.2f} - ${confidence_interval_upper:.2f}",
-                            help="95% confidence interval"
-                        )
-                        
-                        # Pricing breakdown
-                        st.markdown("### 📊 Pricing Breakdown")
-                        
-                        breakdown_df = pd.DataFrame({
-                            'Component': ['Base Prediction', 'Price Multiplier', 'Discount Applied', 'Final Price'],
-                            'Value': [f"${base_prediction:.2f}", 
-                                    f"{base_multiplier:.2f}x",
-                                    f"-{urgency_discount}%",
-                                    f"${adjusted_price:.2f}"]
-                        })
-                        
-                        st.table(breakdown_df)
-                        
-                        # Visualization
-                        st.markdown("### 📈 Price Comparison")
-                        
-                        # Create comparison chart
-                        comparison_prices = pd.DataFrame({
-                            'Scenario': ['Conservative\n(-10%)', 'Base\nPrediction', 'Recommended\nPrice', 
-                                       'Aggressive\n(+10%)', 'Market Max'],
-                            'Price': [base_prediction * 0.9, base_prediction, adjusted_price, 
-                                    base_prediction * 1.1, y_price.max()],
-                            'Color': ['lightblue', 'blue', 'green', 'orange', 'red']
-                        })
-                        
-                        fig_price = px.bar(
-                            comparison_prices,
-                            x='Scenario',
-                            y='Price',
-                            title='Price Comparison Across Scenarios',
-                            color='Color',
-                            color_discrete_map={c: c for c in comparison_prices['Color']},
-                            text='Price'
-                        )
-                        fig_price.update_traces(texttemplate='$%{text:.2f}', textposition='outside')
-                        fig_price.update_layout(showlegend=False, height=400)
-                        st.plotly_chart(fig_price, use_container_width=True)
-                        
-                        # Recommendations
-                        st.markdown("### 💡 Pricing Recommendations")
-                        
-                        if adjusted_price > base_prediction:
-                            st.info("📈 **Premium Pricing Strategy**: Customer profile suggests higher willingness to pay. Consider bundling premium features.")
-                        elif adjusted_price < base_prediction:
-                            st.warning("📉 **Discount Pricing Strategy**: Price-sensitive customer. Consider offering payment plans or trial periods.")
-                        else:
-                            st.success("✅ **Standard Pricing**: Customer profile aligns with average market expectations.")
-                        
-                        # Market positioning
-                        percentile = (y_price <= adjusted_price).mean() * 100
-                        st.metric("Market Position", f"{percentile:.1f}th Percentile", 
-                                help="Percentage of customers willing to pay less than recommended price")
-                        
-                        # Revenue optimization tips
-                        with st.expander("🎯 Revenue Optimization Tips"):
-                            st.markdown("""
-                            **Based on this customer profile:**
-                            
-                            1. **Upselling Opportunities**: 
-                               - Highlight premium features that align with customer's field
-                               - Offer annual plan with 20% discount
-                            
-                            2. **Retention Strategies**:
-                               - Personalized learning path recommendations
-                               - Early access to new content
-                            
-                            3. **Conversion Tactics**:
-                               - Limited-time offer (urgency)
-                               - Money-back guarantee (reduce risk)
-                               - Free trial period
-                            
-                            4. **Segment-Specific Offers**:
-                               - Corporate/team pricing for business customers
-                               - Student discounts for lower income segments
-                            """)
+                    for cluster_id in sorted(set(labels)):
+                        if cluster_id != -1: # Skip noise points in DBSCAN
+                            with st.expander(f"Cluster {cluster_id} ({sum(labels==cluster_id)} members)"):
+                                cluster_data = df[df['Cluster'] == cluster_id][selected_features]
+                                st.dataframe(cluster_data.describe().T, use_container_width=True)
                 
                 else:
-                    st.info("👈 Enter customer profile and click 'Calculate Optimal Price'")
+                    st.error("Clustering failed to identify multiple clusters")
                     
-                    # Show sample price distribution
-                    st.markdown("### 📊 Market Price Distribution")
+            except Exception as e:
+                st.error(f"Error during clustering: {str(e)}")
+
+# ============================================================================
+# PAGE 5: REGRESSION ANALYSIS
+# ============================================================================
+
+def page_regression():
+    st.markdown('<h2 class="sub-header">💰 Willingness to Pay - Regression Analysis</h2>', 
+                unsafe_allow_html=True)
+    
+    if st.session_state.df_processed is None:
+        st.warning("⚠️ Please process data first!")
+        return
+    
+    df = st.session_state.df_processed
+    
+    if 'WTP_Numeric' not in df.columns:
+        st.error("WTP_Numeric column not found. Please ensure data is processed correctly.")
+        return
+    
+    st.markdown("""
+    ### 📋 About Regression Analysis
+    Predict customer willingness to pay using machine learning algorithms.
+    """)
+    
+    # Feature selection
+    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    
+    # Remove target from features
+    if 'WTP_Numeric' in numeric_cols:
+        numeric_cols.remove('WTP_Numeric')
+    
+    selected_features = st.multiselect(
+        "Select features for prediction",
+        numeric_cols,
+        default=numeric_cols[:min(10, len(numeric_cols))]
+    )
+    
+    if len(selected_features) < 1:
+        st.warning("Please select at least 1 feature")
+        return
+    
+    # Model selection
+    models_to_run = st.multiselect(
+        "Select models to compare",
+        ["Linear Regression", "Ridge Regression", "Lasso Regression", 
+         "Random Forest", "Gradient Boosting"],
+        default=["Linear Regression", "Random Forest", "Gradient Boosting"]
+    )
+    
+    test_size = st.slider("Test Set Size (%)", 10, 40, 20, 5) / 100
+    
+    if st.button("🚀 Train Models", type="primary"):
+        with st.spinner("Training models..."):
+            try:
+                # Prepare data
+                X = df[selected_features].copy()
+                y = df['WTP_Numeric'].copy()
+                
+                # Handle missing values
+                X = X.fillna(X.median())
+                y = y.fillna(y.median())
+                
+                # Split data
+                X_train, X_test, y_train, y_test = train_test_split(
+                    X, y, test_size=test_size, random_state=42
+                )
+                
+                # Scale features
+                scaler = StandardScaler()
+                X_train_scaled = scaler.fit_transform(X_train)
+                X_test_scaled = scaler.transform(X_test)
+                
+                # Train models
+                results = {}
+                
+                for model_name in models_to_run:
+                    if model_name == "Linear Regression":
+                        model = LinearRegression()
+                    elif model_name == "Ridge Regression":
+                        model = Ridge(alpha=1.0, random_state=42)
+                    elif model_name == "Lasso Regression":
+                        model = Lasso(alpha=0.1, random_state=42)
+                    elif model_name == "Random Forest":
+                        model = RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1)
+                    elif model_name == "Gradient Boosting":
+                        model = GradientBoostingRegressor(n_estimators=100, random_state=42)
                     
-                    fig_dist = px.histogram(
-                        df,
-                        x='Willingness_To_Pay',
-                        nbins=30,
-                        title='Distribution of Customer Willingness to Pay',
-                        labels={'Willingness_To_Pay': 'Price ($)', 'count': 'Number of Customers'}
-                    )
-                    fig_dist.add_vline(x=df['Willingness_To_Pay'].median(), 
-                                      line_dash="dash", line_color="red",
-                                      annotation_text=f"Median: ${df['Willingness_To_Pay'].median():.2f}")
-                    st.plotly_chart(fig_dist, use_container_width=True)
+                    # Train
+                    model.fit(X_train_scaled, y_train)
+                    
+                    # Predict
+                    y_pred = model.predict(X_test_scaled)
+                    
+                    # Metrics
+                    r2 = r2_score(y_test, y_pred)
+                    rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+                    mae = mean_absolute_error(y_test, y_pred)
+                    
+                    results[model_name] = {
+                        'model': model,
+                        'r2': r2,
+                        'rmse': rmse,
+                        'mae': mae,
+                        'y_pred': y_pred
+                    }
+                
+                # Display results
+                st.markdown("### 📊 Model Performance Comparison")
+                
+                comparison_df = pd.DataFrame({
+                    'Model': list(results.keys()),
+                    'R² Score': [r['r2'] for r in results.values()],
+                    'RMSE': [r['rmse'] for r in results.values()],
+                    'MAE': [r['mae'] for r in results.values()]
+                })
+                
+                st.dataframe(comparison_df.style.highlight_max(subset=['R² Score'], color='lightgreen')
+                             .highlight_min(subset=['RMSE', 'MAE'], color='lightgreen'),
+                             use_container_width=True)
+                
+                # Best model
+                best_model_name = comparison_df.loc[comparison_df['R² Score'].idxmax(), 'Model']
+                best_result = results[best_model_name]
+                
+                st.success(f"🏆 Best Model: {best_model_name} (R² = {best_result['r2']:.4f})")
+                
+                # Visualizations
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    # Model comparison
+                    fig = px.bar(comparison_df, x='Model', y='R² Score',
+                                 title='Model Comparison (R² Score)',
+                                 color='R² Score',
+                                 color_continuous_scale='Viridis')
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                with col2:
+                    # Actual vs Predicted
+                    fig = px.scatter(x=y_test, y=best_result['y_pred'],
+                                     labels={'x': 'Actual WTP', 'y': 'Predicted WTP'},
+                                     title=f'Actual vs Predicted ({best_model_name})',
+                                     trendline='ols')
+                    fig.add_shape(type='line', x0=y_test.min(), y0=y_test.min(),
+                                  x1=y_test.max(), y1=y_test.max(),
+                                  line=dict(color='red', dash='dash'))
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                # Feature importance (if available)
+                if hasattr(best_result['model'], 'feature_importances_'):
+                    st.markdown("### 🎯 Feature Importance")
+                    
+                    importance_df = pd.DataFrame({
+                        'Feature': selected_features,
+                        'Importance': best_result['model'].feature_importances_
+                    }).sort_values('Importance', ascending=False)
+                    
+                    fig = px.bar(importance_df.head(10), x='Importance', y='Feature',
+                                 orientation='h',
+                                 title='Top 10 Most Important Features',
+                                 color='Importance',
+                                 color_continuous_scale='Viridis')
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                # Store results in session state
+                st.session_state.regression_results = results
+                st.session_state.best_model_name = best_model_name
+                
+            except Exception as e:
+                st.error(f"Error during training: {str(e)}")
+
+# ============================================================================
+# PAGE 6: BUSINESS DASHBOARD
+# ============================================================================
+
+def page_dashboard():
+    st.markdown('<h2 class="sub-header">📈 Executive Business Dashboard</h2>', 
+                unsafe_allow_html=True)
+    
+    if st.session_state.df is None:
+        st.warning("⚠️ Please upload or generate data first!")
+        return
+    
+    df = st.session_state.df
+    
+    # KPIs
+    st.markdown("### 📊 Key Performance Indicators")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("Total Respondents", len(df))
+    
+    with col2:
+        if 'Q31_Interest_Level' in df.columns:
+            high_interest = len(df[df['Q31_Interest_Level'].isin(['Definitely would subscribe', 'Very likely to subscribe'])])
+            st.metric("High Interest", f"{high_interest} ({high_interest/len(df)*100:.1f}%)")
+    
+    with col3:
+        if st.session_state.df_processed is not None and 'WTP_Numeric' in st.session_state.df_processed.columns:
+            avg_wtp = st.session_state.df_processed['WTP_Numeric'].mean()
+            st.metric("Avg WTP", f"${avg_wtp:.2f}")
+    
+    with col4:
+        if 'Q22_Current_Spending' in df.columns:
+            current_spenders = len(df[df['Q22_Current_Spending'] != '$0 (Only free resources)'])
+            st.metric("Current Spenders", f"{current_spenders} ({current_spenders/len(df)*100:.1f}%)")
+    
+    # Charts
+    st.markdown("---")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if 'Q31_Interest_Level' in df.columns:
+            st.markdown("### 📊 Interest Level Distribution")
+            interest_counts = df['Q31_Interest_Level'].value_counts()
+            fig = px.pie(values=interest_counts.values, names=interest_counts.index,
+                         title='Customer Interest Distribution',
+                         color_discrete_sequence=px.colors.sequential.Viridis)
+            st.plotly_chart(fig, use_container_width=True)
+    
+    with col2:
+        if 'Q23_Willingness_To_Pay' in df.columns:
+            st.markdown("### 💰 Willingness to Pay Distribution")
+            wtp_counts = df['Q23_Willingness_To_Pay'].value_counts().sort_index()
+            fig = px.bar(x=wtp_counts.index, y=wtp_counts.values,
+                         labels={'x': 'WTP Range', 'y': 'Count'},
+                         title='WTP Distribution',
+                         color=wtp_counts.values,
+                         color_continuous_scale='Viridis')
+            st.plotly_chart(fig, use_container_width=True)
+    
+    # Business Insights
+    st.markdown("---")
+    st.markdown("### 💡 Key Business Insights")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("""
+        <div class='insight-box'>
+        <h4>🎯 Target Customer Profile</h4>
+        <ul>
+            <li>Age: 25-44 years (highest interest)</li>
+            <li>Income: $50K-$150K (optimal pricing power)</li>
+            <li>Interest: High engagement with tech topics</li>
+            <li>Current behavior: Active learners, 6-10 hours/week</li>
+        </ul>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown("""
+        <div class='insight-box'>
+        <h4>💰 Pricing Strategy</h4>
+        <ul>
+            <li>Basic Tier: $25-38/month (budget segment)</li>
+            <li>Standard Tier: $63-88/month (value seekers)</li>
+            <li>Premium Tier: $125+/month (high earners)</li>
+            <li>Freemium model for customer acquisition</li>
+        </ul>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("""
+        <div class='insight-box'>
+        <h4>📈 Growth Opportunities</h4>
+        <ul>
+            <li>40% show high interest - focus on conversion</li>
+            <li>Tech professionals willing to pay premium</li>
+            <li>Strong demand for personalization features</li>
+            <li>Certification value drives higher WTP</li>
+        </ul>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown("""
+        <div class'insight-box'>
+        <h4>🎓 Content Priorities</h4>
+        <ul>
+            <li>Data Science & ML (highest demand)</li>
+            <li>Python Programming (career advancement)</li>
+            <li>Business Analytics (corporate market)</li>
+            <li>Cloud Computing (enterprise focus)</li>
+        </ul>
+        </div>
+        """, unsafe_allow_html=True)
+
+# ============================================================================
+# PAGE 7: EXPORT REPORTS
+# ============================================================================
+
+def page_export():
+    st.markdown('<h2 class="sub-header">📥 Export Reports & Data</h2>', 
+                unsafe_allow_html=True)
+    
+    if st.session_state.df is None:
+        st.warning("⚠️ Please upload or generate data first!")
+        return
+    
+    st.markdown("### 📊 Available Exports")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("#### 📄 Raw Data")
+        
+        # Export raw data
+        csv = st.session_state.df.to_csv(index=False)
+        st.download_button(
+            label="📥 Download Raw Data (CSV)",
+            data=csv,
+            file_name=f"survey_data_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv"
+        )
+        
+        # Export processed data
+        if st.session_state.df_processed is not None:
+            csv_processed = st.session_state.df_processed.to_csv(index=False)
+            st.download_button(
+                label="📥 Download Processed Data (CSV)",
+                data=csv_processed,
+                file_name=f"processed_data_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv"
+            )
+    
+    with col2:
+        st.markdown("#### 📊 Analysis Results")
+        
+        # Export regression results
+        if 'regression_results' in st.session_state:
+            results_text = "REGRESSION ANALYSIS RESULTS\n\n"
+            for model_name, result in st.session_state.regression_results.items():
+                results_text += f"{model_name}:\n"
+                results_text += f"  R² Score: {result['r2']:.4f}\n"
+                results_text += f"  RMSE: ${result['rmse']:.2f}\n"
+                results_text += f"  MAE: ${result['mae']:.2f}\n\n"
+            
+            st.download_button(
+                label="📥 Download Regression Results (TXT)",
+                data=results_text,
+                file_name=f"regression_results_{datetime.now().strftime('%Y%m%d')}.txt",
+                mime="text/plain"
+            )
+    
+    st.markdown("---")
+    
+    # Summary report
+    st.markdown("### 📋 Generate Summary Report")
+    
+    if st.button("📄 Generate Executive Summary"):
+        with st.spinner("Generating report..."):
+            report = f"""
+            EXECUTIVE SUMMARY REPORT
+            Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+            
+            ============================================================
+            DATASET OVERVIEW
+            ============================================================
+            Total Records: {len(st.session_state.df)}
+            Total Features: {len(st.session_state.df.columns)}
+            
+            ============================================================
+            KEY FINDINGS
+            ============================================================
+            """
+            
+            if 'Q31_Interest_Level' in st.session_state.df.columns:
+                high_interest = len(st.session_state.df[st.session_state.df['Q31_Interest_Level'].isin(['Definitely would subscribe', 'Very likely to subscribe'])])
+                report += f"\n• High Interest Customers: {high_interest} ({high_interest/len(st.session_state.df)*100:.1f}%)"
+            
+            if st.session_state.df_processed is not None and 'WTP_Numeric' in st.session_state.df_processed.columns:
+                avg_wtp = st.session_state.df_processed['WTP_Numeric'].mean()
+                report += f"\n• Average Willingness to Pay: ${avg_wtp:.2f}"
+            
+            report += """
+            
+            ============================================================
+            RECOMMENDATIONS
+            ============================================================
+            1. Implement tiered pricing strategy ($25, $63, $125 tiers)
+            2. Focus marketing on 25-44 age group with $50K+ income
+            3. Prioritize Data Science and ML content development
+            4. Emphasize certification value in messaging
+            5. Offer freemium model for customer acquisition
+            
+            ============================================================
+            NEXT STEPS
+            ============================================================
+            1. Validate findings with A/B testing
+            2. Develop MVP with core features
+            3. Launch beta program with early adopters
+            4. Monitor KPIs and adjust strategy
+            5. Scale based on validated learnings
+            """
+            
+            st.download_button(
+                label="📥 Download Executive Summary",
+                data=report,
+                file_name=f"executive_summary_{datetime.now().strftime('%Y%m%d')}.txt",
+                mime="text/plain"
+            )
+            
+            st.success("✅ Report generated successfully!")
+
+# ============================================================================
+# RUN APPLICATION
+# ============================================================================
 
 if __name__ == "__main__":
     main()
