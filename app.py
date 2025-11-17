@@ -480,8 +480,12 @@ def page_home():
 # PAGE 2: EXPLORATORY DATA ANALYSIS
 # ============================================================================
 
+# ============================================================================
+# PAGE 2: EXPLORATORY DATA ANALYSIS (CORRECTED)
+# ============================================================================
+
 def page_eda():
-    st.markdown('<h2 class="sub-header">📊 Exploratory Data Analysis</h2>', 
+    st.markdown('<h2 class="sub-header">📊 Exploratory Data Analysis</h2>',
                 unsafe_allow_html=True)
     
     if st.session_state.df is None:
@@ -490,10 +494,10 @@ def page_eda():
     
     df = st.session_state.df
     
-    tab1, tab2, tab3, tab4 = st.tabs(["📈 Statistical Summary", "📊 Distributions", 
+    tab1, tab2, tab3, tab4 = st.tabs(["📈 Statistical Summary", "📊 Distributions",
                                      "🔗 Correlations", "🎯 Target Analysis"])
     
-    # Tab 1: Statistical Summary
+    # Tab 1: Statistical Summary (Unchanged)
     with tab1:
         st.markdown("### 📈 Statistical Summary")
         
@@ -525,44 +529,55 @@ def page_eda():
                 fig.update_traces(marker_color='#667eea')
                 st.plotly_chart(fig, use_container_width=True)
     
-    # Tab 2: Distributions
+    # Tab 2: Distributions (FIXED LOGIC)
     with tab2:
         st.markdown("### 📊 Variable Distributions")
         
         # Select variable
         all_cols = df.columns.tolist()
-        selected_var = st.selectbox("Select variable to visualize", all_cols, key="dist_select")
+        selected_var = st.selectbox("Select variable to visualize", all_cols, key="dist_select_corrected")
+        
+        # Determine if the variable should be treated as continuous or discrete/categorical
+        is_numeric = df[selected_var].dtype in [np.dtype('int64'), np.dtype('float64')]
+        # A variable is 'continuous' if it's numeric and has more than a low number of unique values (e.g., > 15)
+        is_continuous_numeric = is_numeric and (df[selected_var].nunique() > 15)
         
         col1, col2 = st.columns(2)
         
         with col1:
-            # Histogram
-            if df[selected_var].dtype in ['int64', 'float64']:
+            # Plot 1: Histogram (Continuous) or Bar Chart (Discrete/Categorical)
+            if is_continuous_numeric:
+                # Continuous Numeric: Use Histogram
                 fig = px.histogram(df, x=selected_var, title=f'Distribution of {selected_var}',
-                                   marginal='box', color_discrete_sequence=['#667eea'])
+                                 marginal='box', color_discrete_sequence=['#667eea'])
                 st.plotly_chart(fig, use_container_width=True)
             else:
-                value_counts = df[selected_var].value_counts()
-                fig = px.pie(values=value_counts.values, names=value_counts.index,
-                             title=f'Distribution of {selected_var}')
+                # Discrete/Categorical (including low-cardinality numerics): Use Bar Chart
+                value_counts = df[selected_var].value_counts().sort_values(ascending=False).head(15)
+                # Convert index to string to ensure correct plotting for discrete numerics
+                fig = px.bar(x=value_counts.index.astype(str), y=value_counts.values,
+                             labels={'x': selected_var, 'y': 'Count'},
+                             title=f'Distribution of {selected_var}',
+                             color=value_counts.values,
+                             color_continuous_scale='Viridis')
                 st.plotly_chart(fig, use_container_width=True)
-        
+
         with col2:
-            # Box plot or count plot
-            if df[selected_var].dtype in ['int64', 'float64']:
+            # Plot 2: Box Plot (Continuous) or Pie Chart (Discrete/Categorical)
+            if is_continuous_numeric:
+                # Continuous Numeric: Use Box Plot
                 fig = px.box(df, y=selected_var, title=f'Box Plot of {selected_var}',
                              color_discrete_sequence=['#764ba2'])
                 st.plotly_chart(fig, use_container_width=True)
             else:
+                # Discrete/Categorical: Use Pie Chart (for proportion visualization)
                 value_counts = df[selected_var].value_counts().head(10)
-                fig = px.bar(x=value_counts.index, y=value_counts.values,
-                             title=f'Top 10 Categories in {selected_var}',
-                             labels={'x': selected_var, 'y': 'Count'},
-                             color=value_counts.values,
-                             color_continuous_scale='Viridis')
+                fig = px.pie(values=value_counts.values, names=value_counts.index.astype(str),
+                             title=f'Top 10 Categories Percentage Distribution',
+                             color_discrete_sequence=px.colors.qualitative.Set2)
                 st.plotly_chart(fig, use_container_width=True)
     
-    # Tab 3: Correlations
+    # Tab 3: Correlations (Unchanged)
     with tab3:
         st.markdown("### 🔗 Correlation Analysis")
         
@@ -575,12 +590,12 @@ def page_eda():
                 
                 # Heatmap
                 fig = px.imshow(corr_matrix, 
-                                labels=dict(color="Correlation"),
-                                x=corr_matrix.columns,
-                                y=corr_matrix.columns,
-                                color_continuous_scale='RdBu_r',
-                                aspect="auto",
-                                title="Correlation Matrix")
+                                 labels=dict(color="Correlation"),
+                                 x=corr_matrix.columns,
+                                 y=corr_matrix.columns,
+                                 color_continuous_scale='RdBu_r',
+                                 aspect="auto",
+                                 title="Correlation Matrix")
                 fig.update_layout(height=600)
                 st.plotly_chart(fig, use_container_width=True)
                 
@@ -599,7 +614,7 @@ def page_eda():
         else:
             st.info("Process data first to see correlations")
     
-    # Tab 4: Target Analysis
+    # Tab 4: Target Analysis (Unchanged)
     with tab4:
         st.markdown("### 🎯 Willingness to Pay Analysis")
         
